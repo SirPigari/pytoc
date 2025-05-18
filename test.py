@@ -1,15 +1,13 @@
-def greet(name, greeting="Hello"):
-    return f", " + name + "!"
-
-print(greet("Alice"))
+def add(a, b):
+    return a + b
 
 
-# names = ["Alice", "Bob", "Charlie"]
-#
-# for n in names:
-#     print(greet(n))
-#
-# count = 0
-# while count < 3:
-#     print(count)
-#     count = count + 1
+def main():
+    print("Welcome to PYTOC demo!")
+    x = int(input("Enter first number: "))
+    y = int(input("Enter second number: "))
+    result = add(x, y)
+    print("The sum is:", result)
+
+
+main()

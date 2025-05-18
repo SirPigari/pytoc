@@ -1,6 +1,8 @@
 #ifndef RUNTIME_C
 #define RUNTIME_C
 
+#include "../headers/runtime.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -206,33 +208,41 @@ Value chr_val(Value v) {
 }
 
 // range() - simplified, creates list of ints from start to end-1
-Value range_val(int start, int stop, int step) {
-    if (step == 0) {
+Value range_val(Value v_start, Value v_stop, Value v_step) {
+    if (v_step.int_val == 0) {
         fprintf(stderr, "ValueError: range() step argument must not be zero\n");
         exit(1);
     }
+
+    int start = v_start.int_val;
+    int stop = v_stop.int_val;
+    int step = v_step.int_val;
+
     int count = 0;
     if ((step > 0 && start >= stop) || (step < 0 && start <= stop)) {
         return create_list(0); // empty list
     }
+
     for (int i = start; (step > 0) ? (i < stop) : (i > stop); i += step) {
         count++;
     }
+
     Value list = create_list(count);
     int index = 0;
     for (int i = start; (step > 0) ? (i < stop) : (i > stop); i += step) {
         list.list_val.items[index++] = create_int(i);
     }
+
     return list;
 }
 
 // Overloads for range_val with 1 or 2 arguments
-Value range_stop(int stop) {
-    return range_val(0, stop, 1);
+Value range_stop(Value v_stop) {
+    return range_val(create_int(0), v_stop, create_int(1));
 }
 
-Value range_start_stop(int start, int stop) {
-    return range_val(start, stop, 1);
+Value range_start_stop(Value v_start, Value v_stop) {
+    return range_val(v_start, v_stop, create_int(1));
 }
 
 // reversed() - returns a reversed list copy
@@ -351,6 +361,7 @@ Value make_list(int lenght, Value* items) {
     return list;
 }
 
+
 Value make_tuple(int lenght, Value* items) {
     Value tuple = create_tuple(lenght);
     for (int i = 0; i < lenght; i++) {
@@ -361,6 +372,18 @@ Value make_tuple(int lenght, Value* items) {
 
 bool is_none(Value v) {
     return v.type == TYPE_NONE;
+}
+
+bool is_int(Value v) {
+    return v.type == TYPE_INT;
+}
+
+bool is_true(Value v) {
+    return v.type == TYPE_INT && v.int_val != 0;
+}
+
+bool is_false(Value v) {
+    return !is_true(v);
 }
 
 

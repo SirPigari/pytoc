@@ -1,6 +1,8 @@
 #ifndef OPS_C
 #define OPS_C
 
+#include "../headers/ops.h"
+
 #include "runtime.c"
 #include "_global.c"
 
@@ -67,6 +69,7 @@ Value div_values(Value a, Value b) {
     }
 }
 
+// String operation
 Value join_strings(int count, ...) {
     va_list args;
     va_start(args, count);
@@ -113,6 +116,92 @@ Value join_strings(int count, ...) {
     Value result = create_string(buffer);
     free(buffer);
     return result;
+}
+
+
+// Comparison operations
+Value eq_values(Value a, Value b) {
+    if (a.type == b.type) {
+        switch (a.type) {
+            case TYPE_INT:
+                return create_int(a.int_val == b.int_val);
+            case TYPE_STRING:
+                return create_int(strcmp(a.string_val, b.string_val) == 0);
+            default:
+                return create_int(0);
+        }
+    }
+    return create_int(0);
+}
+
+Value ne_values(Value a, Value b) {
+    if (a.type == b.type) {
+        switch (a.type) {
+            case TYPE_INT:
+                return create_int(a.int_val != b.int_val);
+            case TYPE_STRING:
+                return create_int(strcmp(a.string_val, b.string_val) != 0);
+            default:
+                return create_int(0);
+        }
+    }
+    return create_int(1);
+}
+
+Value lt_values(Value a, Value b) {
+    if (a.type == b.type) {
+        switch (a.type) {
+            case TYPE_INT:
+                return create_int(a.int_val < b.int_val);
+            case TYPE_STRING:
+                return create_int(strcmp(a.string_val, b.string_val) < 0);
+            default:
+                return create_int(0);
+        }
+    }
+    return create_int(0);
+}
+
+Value le_values(Value a, Value b) {
+    if (a.type == b.type) {
+        switch (a.type) {
+            case TYPE_INT:
+                return create_int(a.int_val <= b.int_val);
+            case TYPE_STRING:
+                return create_int(strcmp(a.string_val, b.string_val) <= 0);
+            default:
+                return create_int(0);
+        }
+    }
+    return create_int(0);
+}
+
+Value gt_values(Value a, Value b) {
+    if (a.type == b.type) {
+        switch (a.type) {
+            case TYPE_INT:
+                return create_int(a.int_val > b.int_val);
+            case TYPE_STRING:
+                return create_int(strcmp(a.string_val, b.string_val) > 0);
+            default:
+                return create_int(0);
+        }
+    }
+    return create_int(0);
+}
+
+Value ge_values(Value a, Value b) {
+    if (a.type == b.type) {
+        switch (a.type) {
+            case TYPE_INT:
+                return create_int(a.int_val >= b.int_val);
+            case TYPE_STRING:
+                return create_int(strcmp(a.string_val, b.string_val) >= 0);
+            default:
+                return create_int(0);
+        }
+    }
+    return create_int(0);
 }
 
 #endif // OPS_C

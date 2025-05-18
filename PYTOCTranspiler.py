@@ -2,6 +2,29 @@ import ast
 import os
 import hashlib
 
+class ScopedEnvironment:
+    def __init__(self):
+        self.stack = [{}]
+
+    def enter(self):
+        self.stack.append({})
+
+    def exit(self):
+        self.stack.pop()
+
+    def set(self, name, value):
+        self.stack[-1][name] = value
+
+    def get(self, name):
+        for scope in reversed(self.stack):
+            if name in scope:
+                return scope[name]
+        return None  # Not found
+
+    def current_scope(self):
+        return self.stack[-1]
+
+
 class PYTOCTranspiler:
     def __init__(self, debug=False):
         self.debug = debug
@@ -16,129 +39,132 @@ class PYTOCTranspiler:
         self.constants = {}
         self.functions = {}
         self.tmps = {}
+        self.inline_tmps = {}
+        self.env = ScopedEnvironment()
 
         import os
 
         self.function_map = {
             "print": {
-                "lib": f"\"{os.path.abspath('source/_global.c')}\"",
-                "temp": {
-                    "prefix": "_print",
-                    "code": f"Value {{}}[{{ temp_name }}] = {{}}"
-                },
-                "format": "print(make_list({3}, {0}), {1}, {2})",
+                "lib": f"\"{os.path.abspath('include/io.c')}\"",
+                "format": "print({0}, {1}, {2})",
                 "type": "Value",
                 "args": [
-                    {"name": "args", "type": "Value", "default": "create_string(\"\")"},
+                    {"name": "*args", "type": "Value", "default": "create_string(\"\")"},
                     {"name": "sep", "type": "Value", "default": "create_string(\" \")"},
                     {"name": "end", "type": "Value", "default": "create_string(\"\\n\")"},
-                    {"name": "list_len", "type": "int", "default": "0", "code": "len(args)"},
                 ]
             },
+            "input": {
+                "lib": f"\"{os.path.abspath('include/io.c')}\"",
+                "format": "input({0})",
+                "type": "Value",
+                "args": [{"name": "prompt", "type": "Value", "default": "create_string(\"\")"}],
+            },
             "int": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "to_int({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "str": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "to_string({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "len": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "len({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "abs": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "abs_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "max": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "max_val({0})",
                 "type": "Value",
                 "args": [{"name": "list", "type": "Value"}],
             },
             "min": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "min_val({0})",
                 "type": "Value",
                 "args": [{"name": "list", "type": "Value"}],
             },
             "sum": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "sum_val({0})",
                 "type": "Value",
                 "args": [{"name": "list", "type": "Value"}],
             },
             "bool": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "bool_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "ord": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "ord_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "chr": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "chr_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "range": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "range_stop({0})",
                 "type": "Value",
                 "args": [{"name": "stop", "type": "int"}],
             },
             "range_start_stop": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "range_start_stop({0}, {1})",
                 "type": "Value",
                 "args": [{"name": "start", "type": "int"}, {"name": "stop", "type": "int"}],
             },
             "reversed": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "reversed_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "upper": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "upper_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "lower": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "lower_val({0})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
             "isinstance": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "isinstance_val({0}, {1})",
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}, {"name": "type", "type": "ValueType"}],
             },
             "sorted": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "sorted_val({0})",
                 "type": "Value",
                 "args": [{"name": "list", "type": "Value"}],
             },
             "set": {
-                "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "set_val({0})",
                 "type": "Value",
                 "args": [{"name": "list", "type": "Value"}],
@@ -161,6 +187,14 @@ class PYTOCTranspiler:
             self.tmps[temp_name] = code
         return temp_name
 
+    def new_temp_inplace(self, prefix="_tmp", code=None):
+        temp_hash = hashlib.md5(str(self.temp_num).encode()).hexdigest()[:8]
+        self.temp_num += 1
+        temp_name = f"{prefix}{temp_hash}"
+        if code is not None:
+            self.inline_tmps[temp_name] = code
+        return temp_name.replace("{{ temp_name }}", temp_name)
+
     def visit(self, node):
         result = self.evaluate(node)
         if isinstance(result, dict) and result.get('stmt'):
@@ -171,6 +205,7 @@ class PYTOCTranspiler:
         dispatch = {
             "Module": self.visit_module,
             "Assign": self.visit_assign,
+            "AugAssign": self.visit_aug_assign,
             "Call": self.visit_call,
             "Name": self.visit_name,
             "Constant": self.visit_constant,
@@ -183,6 +218,9 @@ class PYTOCTranspiler:
             "BinOp": self.visit_binop,
             "JoinedStr": self.visit_joined_str,
             "FormattedValue": self.visit_formatted_value,
+            "For": self.visit_for,
+            "While": self.visit_while,
+            "Compare": self.visit_compare,
         }
         node_type = type(node).__name__
         if node_type in dispatch:
@@ -190,14 +228,121 @@ class PYTOCTranspiler:
         else:
             raise NotImplementedError(f"Unsupported AST node type: {node_type}")
 
+    def visit_compare(self, node):
+        self.debug_log("Compare", "Visiting comparison")
+        if not f'#include "{os.path.abspath("include/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/ops.c")}"')
+
+        left_code = self.visit(node.left)['code']
+        op_code = node.ops[0].__class__.__name__
+        right_code = self.visit(node.comparators[0])['code']
+
+        # Map Python AST operator classes to runtime C functions
+        op_map = {
+            "Eq": "eq_values",
+            "NotEq": "ne_values",
+            "Lt": "lt_values",
+            "LtE": "le_values",
+            "Gt": "gt_values",
+            "GtE": "ge_values",
+        }
+
+        if op_code not in op_map:
+            raise NotImplementedError(f"Unsupported comparison operator: {op_code}")
+
+        func = op_map[op_code]
+        compare_code = f"{func}({left_code}, {right_code})"
+        return {"code": compare_code, "stmt": False}
+
+    def visit_while(self, node):
+        self.debug_log("While", "Visiting while loop")
+
+        condition_code = self.visit(node.test)['code']
+        loop_body = []
+
+        self.indent_level += 1
+        for stmt in node.body:
+            result = self.visit(stmt)
+            if result['stmt']:
+                loop_body.append(self.indent + result['code'] + ";")
+            else:
+                loop_body.append(self.indent + result['code'])
+
+        self.indent_level -= 1
+
+        loop_code = f"{self.indent}while (is_true({condition_code})) {{\n"
+        loop_code += "\n".join(loop_body)
+        loop_code += f"\n{self.indent}}}"
+
+        return {"code": loop_code, "stmt": True}
+
+    def visit_aug_assign(self, node):
+        self.debug_log("AugAssign", "Visiting augmented assignment")
+        if not f'#include "{os.path.abspath("include/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/ops.c")}"')
+
+        target = node.target
+        target_name = target.id
+        op = node.op.__class__.__name__
+
+        # Map Python AST operator classes to runtime C functions
+        op_map = {
+            "Add": "add_values",
+            "Sub": "sub_values",
+            "Mult": "mul_values",
+            "Div": "div_values",
+        }
+
+        if op not in op_map:
+            raise NotImplementedError(f"Unsupported augmented assignment operator: {op}")
+
+        func = op_map[op]
+        value_code = self.visit(node.value)['code']
+        code = f"{target_name} = {func}({target_name}, {value_code})"
+
+        return {"code": code, "stmt": True}
+
+    def visit_for(self, node):
+        self.debug_log("For", "Visiting for loop")
+
+        loop_var = node.target.id
+        iter_expr = self.visit(node.iter)
+        iter_code = iter_expr['code']
+
+        iter_tmp = self.new_temp("_iter")
+        index_var = self.new_temp("_index")
+
+        # Save the iterable in a temporary variable
+        init_iter = f"Value {iter_tmp} = {iter_code};"
+        loop_header = f"{self.indent}for (int {index_var} = 0; {index_var} < {iter_tmp}.list_val.count; {index_var}++) {{"
+
+        self.indent_level += 1
+        loop_body = [f"{self.indent}Value {loop_var} = {iter_tmp}.list_val.items[{index_var}];"]
+
+        for stmt in node.body:
+            result = self.visit(stmt)
+            if result['stmt']:
+                if result['code'].endswith(";"):
+                    loop_body.append(self.indent + result['code'])
+                else:
+                    loop_body.append(self.indent + result['code'] + ";")
+            else:
+                loop_body.append(self.indent + result['code'])
+
+        self.indent_level -= 1
+        loop_footer = f"{self.indent}}}"
+
+        full_loop = '\n'.join([init_iter, loop_header] + loop_body + [loop_footer])
+        return {"code": full_loop, "stmt": True}
+
     def visit_formatted_value(self, node):
         # This visits the value inside the `{}` of an f-string
         value = self.visit(node.value)
         return {"code": f"to_string({value['code']})", "stmt": False}
 
     def visit_joined_str(self, node):
-        if not f'#include "{os.path.abspath("source/ops.c")}"' in self.imports:
-            self.imports.append(f'#include "{os.path.abspath("source/ops.c")}"')
+        if not f'#include "{os.path.abspath("include/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/ops.c")}"')
         self.debug_log("JoinedStr", "Visiting joined string")
 
         parts = []
@@ -218,60 +363,88 @@ class PYTOCTranspiler:
         self.debug_log("FunctionDef", f"Visiting function: {node.name}")
 
         func_name = node.name
+        if func_name == "main":
+            func_name = self.new_temp("_main")
 
-        # Separate args
+        # Extract argument names and defaults
         args = [arg.arg for arg in node.args.args]
-        defaults = node.args.defaults  # list of default values for last N args
+        defaults = node.args.defaults
         num_defaults = len(defaults)
         num_args = len(args)
 
-        # Map args to defaults; defaults correspond to last N args
+        # Map default values
         default_map = {}
         for i, default_node in enumerate(defaults):
             arg_name = args[num_args - num_defaults + i]
             default_code = self.visit(default_node)["code"]
             default_map[arg_name] = default_code
 
-        # *args and **kwargs
         vararg_name = node.args.vararg.arg if node.args.vararg else None
         kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
 
-        # Build function signature:
-        # Use a generic 'Value' type for all params.
-        # Required + optional args explicitly,
-        # *args and **kwargs as 'Value *' or some generic struct pointer.
-        params = []
-        for i, arg in enumerate(args):
-            params.append(f"Value {arg}")
-
+        # Function signature in C
+        params = [f"Value {arg}" for arg in args]
         if vararg_name:
-            params.append(f"Value *{vararg_name}")  # Or appropriate type for varargs
+            params.append(f"Value *{vararg_name}")
         if kwarg_name:
-            params.append(f"Value {kwarg_name}")  # Or dict type for kwargs
+            params.append(f"Value {kwarg_name}")
 
         func_code_lines = [f"Value {func_name}({', '.join(params)}) {{"]
 
-        # Insert code to assign defaults for optional args if they are some sentinel value.
-        # (You’ll need some sentinel value, e.g. a special Value None or NULL to check)
+        # Handle default values in body
         for arg in args:
             if arg in default_map:
                 func_code_lines.append(
                     f"    if (is_none({arg})) {{ {arg} = {default_map[arg]}; }}"
                 )
 
-        # Append body statements
+        # Spawn a new transpiler with its own scope
+        function_transpiler = PYTOCTranspiler(debug=self.debug)
+        function_transpiler.indent_level = self.indent_level + 1
+
+        # Shared state if needed
+        function_transpiler.imports = self.imports
+        function_transpiler.func_defs = self.func_defs
+        function_transpiler.constants = self.constants
+        function_transpiler.functions = self.functions
+
+        # Setup a new scope
+        function_transpiler.env = ScopedEnvironment()
+        function_transpiler.env.enter()
+
+        for arg in args:
+            function_transpiler.env.set(arg, "Value")
+        if vararg_name:
+            function_transpiler.env.set(vararg_name, "Value*")
+        if kwarg_name:
+            function_transpiler.env.set(kwarg_name, "Value")
+
+        # Visit function body
         for stmt in node.body:
-            result = self.visit(stmt)
+            result = function_transpiler.visit(stmt)
+
+            if function_transpiler.inline_tmps:
+                function_transpiler.debug_log("InlineTmps",
+                                              f"Inlined temporary variables: {function_transpiler.inline_tmps}")
+            for tmp_name, tmp_code in function_transpiler.inline_tmps.items():
+                func_code_lines.append(
+                    "    " + tmp_code.replace("{{ temp_name }}", tmp_name) + ";"
+                )
+            function_transpiler.inline_tmps.clear()
+
+            if result['code'] is None:
+                continue
             if not result['stmt']:
                 func_code_lines.append("    " + result['code'])
             else:
                 func_code_lines.append("    " + result['code'] + ";")
 
+        # End of function
         func_code_lines.append("}")
 
         func_code = "\n".join(func_code_lines)
-
         self.func_defs.append(func_code)
+
         self.functions[func_name] = {
             "name": func_name,
             "args": args,
@@ -293,8 +466,8 @@ class PYTOCTranspiler:
 
     def visit_binop(self, node):
         self.debug_log("BinOp", "Visiting binary operation")
-        if not f'#include "{os.path.abspath("source/ops.c")}"' in self.imports:
-            self.imports.append(f'#include "{os.path.abspath("source/ops.c")}"')
+        if not f'#include "{os.path.abspath("include/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/ops.c")}"')
 
         left_code = self.visit(node.left)['code']
         right_code = self.visit(node.right)['code']
@@ -326,7 +499,7 @@ class PYTOCTranspiler:
             else:
                 elements.append(result['code'] + ";")
 
-        tmp_var = self.new_temp("_tuple_items", f"Value {{{{ temp_name }}}}[{len(elements)}] = {{{', '.join(elements)}}}")
+        tmp_var = self.new_temp_inplace("_tuple_items", f"Value {{{{ temp_name }}}}[{len(elements)}] = {{{', '.join(elements)}}}")
 
         tuple_code = f"make_tuple({len(elements)}, {tmp_var})"
         return {"code": tuple_code, "stmt": False}
@@ -342,7 +515,7 @@ class PYTOCTranspiler:
             else:
                 tmp_items.append(item_code['code'] + ";")
 
-        tmp_var = self.new_temp("_list_items", f"Value {{{{ temp_name }}}}[{len(tmp_items)}] = {{{', '.join(tmp_items)}}}")
+        tmp_var = self.new_temp_inplace("_list_items", f"Value {{{{ temp_name }}}}[{len(tmp_items)}] = {{{', '.join(tmp_items)}}}")
 
         list_code = f"make_list({len(tmp_items)}, {tmp_var})"
         return {"code": list_code, "stmt": False}
@@ -360,8 +533,8 @@ class PYTOCTranspiler:
             key_exprs.append(key_code['code'])
             value_exprs.append(value_code['code'])
 
-        tmp_keys = self.new_temp("_dict_keys", f"Value {{{{ temp_name }}}}[{len(key_exprs)}] = {{{', '.join(key_exprs)}}}")
-        tmp_values = self.new_temp("_dict_values", f"Value {{{{ temp_name }}}}[{len(value_exprs)}] = {{{', '.join(value_exprs)}}}")
+        tmp_keys = self.new_temp_inplace("_dict_keys", f"Value {{{{ temp_name }}}}[{len(key_exprs)}] = {{{', '.join(key_exprs)}}}")
+        tmp_values = self.new_temp_inplace("_dict_values", f"Value {{{{ temp_name }}}}[{len(value_exprs)}] = {{{', '.join(value_exprs)}}}")
         dict_code = f"make_dict({len(node.keys)}, {tmp_keys}, {tmp_values})"
 
         return {"code": dict_code, "stmt": False}
@@ -370,8 +543,8 @@ class PYTOCTranspiler:
         self.debug_log("Module", "Visiting module")
 
         self.imports = [
-            f'#include "{os.path.abspath("source/_global.c")}"',
-            f'#include "{os.path.abspath("source/runtime.c")}"'
+            f'#include "{os.path.abspath("include/_global.c")}"',
+            f'#include "{os.path.abspath("include/runtime.c")}"'
         ]
 
         self.func_defs.clear()
@@ -384,6 +557,11 @@ class PYTOCTranspiler:
         body_code_tmp = []
         for stmt in node.body:
             result = self.visit(stmt)
+            if self.inline_tmps:
+                self.debug_log("InlineTmps", f"Inlined temporary variables: {self.inline_tmps}")
+            for tmp_name, tmp_code in self.inline_tmps.items():
+                body_code_tmp.append(f"{self.indent}{str(tmp_code).replace('{{ temp_name }}', str(tmp_name))};")
+            self.inline_tmps.clear()
             if result['code'] is None:
                 continue
             if not result['stmt']:
@@ -464,15 +642,21 @@ class PYTOCTranspiler:
     def visit_expr(self, node):
         result = self.visit(node.value)
         if result.get('stmt'):
-            return result
-        else:
             return {"code": result['code'] + ";", "stmt": True}
+        else:
+            return {"code": result['code'], "stmt": True}
 
     def visit_call(self, node):
         if not isinstance(node.func, ast.Name):
             raise NotImplementedError("Only direct function calls supported")
 
         func_name = node.func.id
+        if func_name == "main":
+            for t in self.functions.keys():
+                if t.startswith("_main"):
+                    func_name = t
+                    break
+
         self.debug_log("Call", f"Visiting call: {func_name}")
 
         if func_name not in self.function_map and func_name not in self.functions:
@@ -501,44 +685,95 @@ class PYTOCTranspiler:
             code = f"{func_name}({', '.join(evaluated_args)})"
             return {"code": code, "stmt": False}
 
-        # Handle function from function_map
         func_info = self.function_map[func_name]
-        include_line = f'#include {func_info["lib"]}'
-        if include_line not in self.imports:
-            self.imports.append(include_line)
-
-        # Visit all args to get their code
-        provided_args = [self.visit(arg)['code'] for arg in node.args]
         expected_args = func_info["args"]
+
+        include_lib = f"#include {func_info['lib']}"
+        if include_lib not in self.imports:
+            self.imports.append(include_lib)
+
+        # Detect *args
+        star_arg_index = -1
+        arg_names = []
+        for i, arg in enumerate(expected_args):
+            name = arg["name"]
+            if name.startswith("**"):
+                raise NotImplementedError("**kwargs not supported yet")
+            if name.startswith("*"):
+                if star_arg_index != -1:
+                    raise SyntaxError(f"Multiple starred args not allowed: {name}")
+                star_arg_index = i
+            arg_names.append(name.lstrip("*"))
+
+        # Visit all arguments
+        pos_args = []
+        kw_args = {}
+        for arg in node.args:
+            pos_args.append(self.visit(arg)["code"])
+        for kw in node.keywords:
+            if kw.arg is None:
+                raise NotImplementedError("**kwargs not supported yet")
+            kw_args[kw.arg] = self.visit(kw.value)["code"]
 
         final_args = []
         named_args = {}
 
-        # Assign provided args to names
-        for i, arg_def in enumerate(expected_args):
-            if i < len(provided_args):
-                val = provided_args[i]
-                final_args.append(val)
-                named_args[arg_def["name"]] = val
-            else:
-                final_args.append(None)  # placeholder for now
+        if star_arg_index != -1:
+            num_pos = star_arg_index
+            if len(pos_args) < num_pos:
+                raise Exception(f"Missing positional arguments for function '{func_name}'")
 
-        # Now resolve missing args (defaults/code)
-        for i, arg_def in enumerate(expected_args):
-            if final_args[i] is not None:
-                continue
-            if "code" in arg_def:
-                try:
+            # Pre-*args
+            final_args.extend(pos_args[:num_pos])
+            for i in range(num_pos):
+                named_args[arg_names[i]] = pos_args[i]
+
+            # Handle *args group as a temporary array
+            starred_items = pos_args[num_pos:]
+            array_init = ", ".join(starred_items)
+            array_len = len(starred_items)
+
+            temp_name = self.new_temp_inplace(
+                prefix=f"_{func_name}_args",
+                code=f"Value {{{{ temp_name }}}}[{array_len}] = {{ {array_init} }}"
+            )
+            star_val = f"make_list({array_len}, {temp_name})"
+
+            final_args.append(star_val)
+            named_args[arg_names[star_arg_index]] = star_val
+
+            # Handle keyword/named args after *args
+            for i in range(star_arg_index + 1, len(expected_args)):
+                arg_def = expected_args[i]
+                name = arg_def["name"]
+                bare_name = name.lstrip("*")
+                if bare_name in kw_args:
+                    val = kw_args[bare_name]
+                elif "code" in arg_def:
                     val = eval(arg_def["code"], {}, named_args)
-                except Exception as e:
-                    raise ValueError(f"Error evaluating code for argument '{arg_def['name']}': {e}")
-                final_args[i] = str(val)
-                named_args[arg_def["name"]] = final_args[i]
-            elif "default" in arg_def:
-                final_args[i] = arg_def["default"]
-                named_args[arg_def["name"]] = final_args[i]
-            else:
-                raise Exception(f"No value for argument '{arg_def['name']}' in function '{func_name}'")
+                elif "default" in arg_def:
+                    val = arg_def["default"]
+                else:
+                    raise Exception(f"No value for argument '{bare_name}'")
+                final_args.append(val)
+                named_args[bare_name] = val
+        else:
+            # No *args
+            for i, arg_def in enumerate(expected_args):
+                name = arg_def["name"]
+                bare_name = name.lstrip("*")
+                if i < len(pos_args):
+                    val = pos_args[i]
+                elif bare_name in kw_args:
+                    val = kw_args[bare_name]
+                elif "code" in arg_def:
+                    val = eval(arg_def["code"], {}, named_args)
+                elif "default" in arg_def:
+                    val = arg_def["default"]
+                else:
+                    raise Exception(f"No value for argument '{bare_name}'")
+                final_args.append(val)
+                named_args[bare_name] = val
 
         try:
             call_expr = func_info["format"].format(*final_args)

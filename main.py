@@ -6,11 +6,15 @@ import subprocess
 import tempfile
 import PYTOCTranspiler
 import sys
+import struct
+
+REQUIRED_PYTHON_VERSION = "3.13"
+VERSION = "0.1.0a"
 
 
 def analyze_python_code(source_code):
     """
-    Analyzes Python source code by tokenizing and parsing it.
+    Analyzes Python include code by tokenizing and parsing it.
 
     Args:
         source_code (str): The Python code to analyze.
@@ -18,7 +22,7 @@ def analyze_python_code(source_code):
     Returns:
         tuple: A tuple containing:
             - tokens (list of tuples): List of (token_type, token_string).
-            - ast_tree (ast.AST): Parsed AST of the source code.
+            - ast_tree (ast.AST): Parsed AST of the include code.
     """
     tokens = []
     g = tokenize.tokenize(BytesIO(source_code.encode('utf-8')).readline)
@@ -34,10 +38,10 @@ def analyze_python_code(source_code):
 
 def compile_c(source_code, output_file, compiler_flags=None, debug=False, arch='32'):
     """
-    Compiles C source code using TCC.
+    Compiles C include code using TCC.
 
     Args:
-        source_code (str): The C source code to compile.
+        source_code (str): The C include code to compile.
         output_file (str): The desired output binary file path.
         compiler_flags (list, optional): Additional flags to pass to TCC.
         debug (bool): If True, include debug symbols.
@@ -60,7 +64,7 @@ def compile_c(source_code, output_file, compiler_flags=None, debug=False, arch='
             tmp.write(source_code)
             tmp_path = tmp.name
     except Exception as e:
-        return False, f"Error creating temporary source file: {e}"
+        return False, f"Error creating temporary include file: {e}"
 
     output_file = os.path.abspath(output_file)
 
@@ -72,7 +76,7 @@ def compile_c(source_code, output_file, compiler_flags=None, debug=False, arch='
     if debug:
         cmd.append('-g')
         print(f"[DEBUG] Using TCC: {tcc_path}")
-        print(f"[DEBUG] Temp source file: {tmp_path}")
+        print(f"[DEBUG] Temp include file: {tmp_path}")
         print(f"[DEBUG] Output file: {output_file}")
         print(f"[DEBUG] Command: {' '.join(cmd)}")
         if compiler_flags:
@@ -91,7 +95,7 @@ def compile_c(source_code, output_file, compiler_flags=None, debug=False, arch='
 
 def python_to_c(source_code, debug=False):
     """
-    Converts Python source code to C code.
+    Converts Python include code to C code.
 
     Args:
         source_code (str): The Python code to convert.
@@ -120,7 +124,7 @@ def python_to_c(source_code, debug=False):
 
 def compile_py_to_c(source_code, output_file, compiler_flags=None, debug=False, arch='32'):
     """
-    Compiles Python source code to C and then compiles the C code to an executable.
+    Compiles Python include code to C and then compiles the C code to an executable.
 
     Args:
         source_code (str): The Python code to compile.
@@ -137,16 +141,22 @@ def compile_py_to_c(source_code, output_file, compiler_flags=None, debug=False, 
     return success, message
 
 
-if __name__ == "__main__":
+def main():
     args = sys.argv[1:]
-    source_file = None
-    output_file = None
     compiler_flags = []
     debug = False
-    architecture = '32'
+    architecture = struct.calcsize("P") * 8
     auto_run = False
     if "-h" in args or "--help" in args:
-        print("Usage: python main.py <source_file.py> <output_file.exe> [compiler_flags] [--debug] [--arch <32|64>] [--auto-run]")
+        print("Usage: python main.py <source_file.py> <output_file.exe> [compiler_flags] [--debug] [--arch <32|64>] [--auto-run] [--version | -v]")
+        sys.exit(0)
+    if "-v" in args or "--version" in args:
+        tcc_path = os.path.abspath(os.path.join(os.path.dirname(__file__), f"tcc/tcc-win{architecture}/tcc.exe"))
+        print(f"Version: {VERSION}, Recommended Python version: {REQUIRED_PYTHON_VERSION} (or higher), TCC version: {os.popen(f'{tcc_path} -v').read().removeprefix('tcc version ').removesuffix("\n")}")
+        print(f"Python version: {sys.version}")
+        print(f"Architecture: {architecture}-bit")
+        print(f"TCC path: {tcc_path}")
+        print(f"Using python at {sys.executable}")
         sys.exit(0)
     if len(args) < 2:
         print("Error: Missing arguments. Use -h or --help for usage.")
@@ -204,4 +214,16 @@ if __name__ == "__main__":
             print(f"Error running the compiled program: {e}")
             sys.exit(1)
 
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nProcess interrupted by user.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        sys.exit(1)
     sys.exit(0)

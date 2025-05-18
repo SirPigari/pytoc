@@ -1,63 +1,26 @@
 #ifndef GLOBAL_C
 #define GLOBAL_C
 
+#include "../headers/_global.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-
-typedef enum {
-    TYPE_NONE,    // Added None type
-    TYPE_INT,
-    TYPE_TUPLE,
-    TYPE_STRING,
-    TYPE_LIST,
-    TYPE_DICT,
-    TYPE_SET,
-    TYPE_FROZENSET
-} ValueType;
-
-typedef struct Value Value;
-
-typedef struct {
-    int count;
-    Value* items;
-} Tuple;
-
-typedef struct {
-    int count;
-    Value* items;
-} List;
-
-typedef struct {
-    int count;
-    Value* keys;
-    Value* values;
-} Dict;
-
-typedef struct {
-    int count;
-    Value* items;
-} Set;
-
-struct Value {
-    ValueType type;
-    union {
-        int int_val;
-        char* string_val;
-        Tuple tuple_val;
-        List list_val;
-        Dict dict_val;
-        Set set_val;
-    };
-};
-
-Value None = { .type = TYPE_NONE };
+#include <stdbool.h>
 
 // Create int value
 Value create_int(int val) {
     Value v;
     v.type = TYPE_INT;
     v.int_val = val;
+    return v;
+}
+
+
+Value create_bool(bool val) {
+    Value v;
+    v.type = TYPE_BOOL;
+    v.int_val = val ? 1 : 0;
     return v;
 }
 
@@ -241,43 +204,6 @@ char* str_concat(const char* a, const char* b) {
     strcpy(result, a);
     strcat(result, b);
     return result;
-}
-
-Value print(Value args_list, Value sep_val, Value end_val) {
-    // Default separators
-    const char* sep = " ";
-    const char* end = "\n";
-
-    // Validate sep_val
-    if (sep_val.type == TYPE_STRING && sep_val.string_val != NULL) {
-        sep = sep_val.string_val;
-    }
-
-    // Validate end_val
-    if (end_val.type == TYPE_STRING && end_val.string_val != NULL) {
-        end = end_val.string_val;
-    }
-
-    // Ensure args_list is a list
-    if (args_list.type != TYPE_LIST) {
-        fprintf(stderr, "print: expected list for args_list\n");
-        return None;
-    }
-
-    // If items pointer is NULL, treat as empty list
-    int count = args_list.list_val.count;
-    Value* items = args_list.list_val.items ? args_list.list_val.items : NULL;
-
-    for (int i = 0; i < count; i++) {
-        print_value(items[i]);
-        if (i < count - 1) {
-            printf("%s", sep);
-        }
-    }
-
-    printf("%s", end);
-    fflush(stdout);
-    return None;
 }
 
 
