@@ -1,5 +1,5 @@
-#ifndef RUNTIME_H
-#define RUNTIME_H
+#ifndef RUNTIME_C
+#define RUNTIME_C
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -364,4 +364,4 @@ bool is_none(Value v) {
 }
 
 
-#endif // RUNTIME_H
+#endif // RUNTIME_C

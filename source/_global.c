@@ -1,5 +1,5 @@
-#ifndef GLOBAL_H
-#define GLOBAL_H
+#ifndef GLOBAL_C
+#define GLOBAL_C
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -130,8 +130,12 @@ Value create_none() {
 Value create_string(const char* str) {
     Value v;
     v.type = TYPE_STRING;
-    v.string_val = (char*)malloc(strlen(str) + 1);
-    strcpy(v.string_val, str);
+    if (!str) str = "";
+    v.string_val = strdup(str);
+    if (!v.string_val) {
+        fprintf(stderr, "create_string: memory allocation failed\n");
+        exit(1);
+    }
     return v;
 }
 
@@ -192,7 +196,7 @@ void print_value(Value v) {
 }
 
 // Free memory recursively (for allocated items)
-Value free_value(Value v) {
+void free_value(Value v) {
     switch (v.type) {
         case TYPE_TUPLE:
             for (int i = 0; i < v.tuple_val.count; i++) {
@@ -221,10 +225,13 @@ Value free_value(Value v) {
             }
             free(v.set_val.items);
             break;
+        case TYPE_STRING:
+            free(v.string_val);
+            break;
         default:
+            // Nothing to free for INT, NONE etc.
             break;
     }
-    return None;
 }
 
 char* str_concat(const char* a, const char* b) {
@@ -236,12 +243,129 @@ char* str_concat(const char* a, const char* b) {
     return result;
 }
 
-Value print(Value v) {
-    print_value(v);
-    printf("\n");
+Value print(Value args_list, Value sep_val, Value end_val) {
+    // Default separators
+    const char* sep = " ";
+    const char* end = "\n";
+
+    // Validate sep_val
+    if (sep_val.type == TYPE_STRING && sep_val.string_val != NULL) {
+        sep = sep_val.string_val;
+    }
+
+    // Validate end_val
+    if (end_val.type == TYPE_STRING && end_val.string_val != NULL) {
+        end = end_val.string_val;
+    }
+
+    // Ensure args_list is a list
+    if (args_list.type != TYPE_LIST) {
+        fprintf(stderr, "print: expected list for args_list\n");
+        return None;
+    }
+
+    // If items pointer is NULL, treat as empty list
+    int count = args_list.list_val.count;
+    Value* items = args_list.list_val.items ? args_list.list_val.items : NULL;
+
+    for (int i = 0; i < count; i++) {
+        print_value(items[i]);
+        if (i < count - 1) {
+            printf("%s", sep);
+        }
+    }
+
+    printf("%s", end);
     fflush(stdout);
     return None;
 }
 
 
-#endif // GLOBAL_H
+Value copy_value(Value v) {
+    Value copy;
+
+    switch (v.type) {
+        case TYPE_NONE:
+            copy.type = TYPE_NONE;
+            break;
+
+        case TYPE_INT:
+            copy.type = TYPE_INT;
+            copy.int_val = v.int_val;
+            break;
+
+        case TYPE_STRING:
+            copy.type = TYPE_STRING;
+            copy.string_val = strdup(v.string_val ? v.string_val : "");
+            if (!copy.string_val) {
+                fprintf(stderr, "copy_value: memory allocation failed\n");
+                exit(1);
+            }
+            break;
+
+        case TYPE_TUPLE:
+            copy.type = TYPE_TUPLE;
+            copy.tuple_val.count = v.tuple_val.count;
+            copy.tuple_val.items = malloc(sizeof(Value) * copy.tuple_val.count);
+            if (!copy.tuple_val.items) {
+                fprintf(stderr, "copy_value: memory allocation failed\n");
+                exit(1);
+            }
+            for (int i = 0; i < copy.tuple_val.count; i++) {
+                copy.tuple_val.items[i] = copy_value(v.tuple_val.items[i]);
+            }
+            break;
+
+        case TYPE_LIST:
+            copy.type = TYPE_LIST;
+            copy.list_val.count = v.list_val.count;
+            copy.list_val.items = malloc(sizeof(Value) * copy.list_val.count);
+            if (!copy.list_val.items) {
+                fprintf(stderr, "copy_value: memory allocation failed\n");
+                exit(1);
+            }
+            for (int i = 0; i < copy.list_val.count; i++) {
+                copy.list_val.items[i] = copy_value(v.list_val.items[i]);
+            }
+            break;
+
+        case TYPE_DICT:
+            copy.type = TYPE_DICT;
+            copy.dict_val.count = v.dict_val.count;
+            copy.dict_val.keys = malloc(sizeof(Value) * copy.dict_val.count);
+            copy.dict_val.values = malloc(sizeof(Value) * copy.dict_val.count);
+            if (!copy.dict_val.keys || !copy.dict_val.values) {
+                fprintf(stderr, "copy_value: memory allocation failed\n");
+                exit(1);
+            }
+            for (int i = 0; i < copy.dict_val.count; i++) {
+                copy.dict_val.keys[i] = copy_value(v.dict_val.keys[i]);
+                copy.dict_val.values[i] = copy_value(v.dict_val.values[i]);
+            }
+            break;
+
+        case TYPE_SET:
+        case TYPE_FROZENSET:
+            copy.type = v.type; // same type (set or frozenset)
+            copy.set_val.count = v.set_val.count;
+            copy.set_val.items = malloc(sizeof(Value) * copy.set_val.count);
+            if (!copy.set_val.items) {
+                fprintf(stderr, "copy_value: memory allocation failed\n");
+                exit(1);
+            }
+            for (int i = 0; i < copy.set_val.count; i++) {
+                copy.set_val.items[i] = copy_value(v.set_val.items[i]);
+            }
+            break;
+
+        default:
+            fprintf(stderr, "copy_value: unsupported type %d\n", v.type);
+            exit(1);
+    }
+
+    return copy;
+}
+
+
+
+#endif // GLOBAL_C

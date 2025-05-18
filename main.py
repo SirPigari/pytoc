@@ -32,7 +32,7 @@ def analyze_python_code(source_code):
     return tokens, tree
 
 
-def compile_c(source_code, output_file, compiler_flags=None, debug=False, mode='32'):
+def compile_c(source_code, output_file, compiler_flags=None, debug=False, arch='32'):
     """
     Compiles C source code using TCC.
 
@@ -41,14 +41,14 @@ def compile_c(source_code, output_file, compiler_flags=None, debug=False, mode='
         output_file (str): The desired output binary file path.
         compiler_flags (list, optional): Additional flags to pass to TCC.
         debug (bool): If True, include debug symbols.
-        mode (str): Target architecture mode ('32' or '64').
+        arch (str): Target architecture mode ('32' or '64').
 
     Returns:
         tuple: (success: bool, message: str)
     """
     base_dir = os.path.abspath(os.path.dirname(__file__))
 
-    tcc_path = os.path.join(base_dir, f"tcc/tcc-win{mode}/tcc.exe")
+    tcc_path = os.path.abspath(os.path.join(base_dir, f"tcc/tcc-win{arch}/tcc.exe"))
     temp_dir = os.path.join(base_dir, "temp")
     os.makedirs(temp_dir, exist_ok=True)
 
@@ -61,6 +61,8 @@ def compile_c(source_code, output_file, compiler_flags=None, debug=False, mode='
             tmp_path = tmp.name
     except Exception as e:
         return False, f"Error creating temporary source file: {e}"
+
+    output_file = os.path.abspath(output_file)
 
     cmd = [tcc_path, tmp_path, '-o', output_file]
     if compiler_flags:
@@ -111,12 +113,12 @@ def python_to_c(source_code, debug=False):
         lines = c_code.splitlines()
         pad = len(str(len(lines)))
         for i, line in enumerate(lines):
-            print(f"{str(i).rjust(pad)}:\t {line}")
+            print(f"{str(i + 1).rjust(pad)}:\t {line}")
         print("\n")
     return c_code
 
 
-def compile_py_to_c(source_code, output_file, compiler_flags=None, debug=False, mode='32'):
+def compile_py_to_c(source_code, output_file, compiler_flags=None, debug=False, arch='32'):
     """
     Compiles Python source code to C and then compiles the C code to an executable.
 
@@ -125,13 +127,13 @@ def compile_py_to_c(source_code, output_file, compiler_flags=None, debug=False, 
         output_file (str): The desired output binary file path.
         compiler_flags (list, optional): Additional flags to pass to TCC.
         debug (bool): If True, include debug symbols.
-        mode (str): Target architecture mode ('32' or '64').
+        arch (str): Target architecture mode ('32' or '64').
 
     Returns:
         tuple: (success: bool, message: str)
     """
     c_code = python_to_c(source_code, debug=debug)
-    success, message = compile_c(c_code, output_file, compiler_flags=compiler_flags, debug=debug, mode=mode)
+    success, message = compile_c(c_code, output_file, compiler_flags=compiler_flags, debug=debug, arch=arch)
     return success, message
 
 
@@ -141,10 +143,10 @@ if __name__ == "__main__":
     output_file = None
     compiler_flags = []
     debug = False
-    mode = '32'
+    architecture = '32'
     auto_run = False
     if "-h" in args or "--help" in args:
-        print("Usage: python main.py <source_file.py> <output_file.exe> [compiler_flags] [--debug] [--mode <32|64>] [--auto-run]")
+        print("Usage: python main.py <source_file.py> <output_file.exe> [compiler_flags] [--debug] [--arch <32|64>] [--auto-run]")
         sys.exit(0)
     if len(args) < 2:
         print("Error: Missing arguments. Use -h or --help for usage.")
@@ -155,8 +157,8 @@ if __name__ == "__main__":
         if arg.startswith("--"):
             if arg == "--debug":
                 debug = True
-            elif arg == "--mode":
-                mode = args[args.index(arg) + 1]
+            elif arg.startswith("--arch"):
+                architecture = arg.split("=")[1]
             elif arg == "--auto-run":
                 auto_run = True
             else:
@@ -174,8 +176,8 @@ if __name__ == "__main__":
     if not os.path.splitext(output_file)[1]:
         output_file += ".exe"
 
-    if mode not in ['32', '64']:
-        print("Error: Mode must be '32' or '64'.")
+    if architecture not in ['32', '64']:
+        print("Error: Architecture must be '32' or '64'.")
         sys.exit(1)
 
     with open(source_file, 'r', encoding='utf-8') as f:
@@ -185,10 +187,10 @@ if __name__ == "__main__":
         print(source_code)
 
     try:
-        success, message = compile_py_to_c(source_code, output_file, compiler_flags=compiler_flags, debug=debug, mode=mode)
+        success, message = compile_py_to_c(source_code, output_file, compiler_flags=compiler_flags, debug=debug, arch=architecture)
     except Exception as e:
         success = False
-        message = f"{os.path.abspath(source_code)}: {e.__class__.__name__}: {e}"
+        message = f"{os.path.abspath(source_file)}: {e.__class__.__name__}: {e}"
     print(f"{message}")
 
     if not success:

@@ -22,9 +22,18 @@ class PYTOCTranspiler:
         self.function_map = {
             "print": {
                 "lib": f"\"{os.path.abspath('source/_global.c')}\"",
-                "format": 'print({0})',
-                "type": "void",
-                "args": [{"name": "v", "type": "Value"}],
+                "temp": {
+                    "prefix": "_print",
+                    "code": f"Value {{}}[{{ temp_name }}] = {{}}"
+                },
+                "format": "print(make_list({3}, {0}), {1}, {2})",
+                "type": "Value",
+                "args": [
+                    {"name": "args", "type": "Value", "default": "create_string(\"\")"},
+                    {"name": "sep", "type": "Value", "default": "create_string(\" \")"},
+                    {"name": "end", "type": "Value", "default": "create_string(\"\\n\")"},
+                    {"name": "list_len", "type": "int", "default": "0", "code": "len(args)"},
+                ]
             },
             "int": {
                 "lib": f"\"{os.path.abspath('source/runtime.c')}\"",
@@ -172,12 +181,38 @@ class PYTOCTranspiler:
             "FunctionDef": self.visit_function_def,
             "Return": self.visit_return,
             "BinOp": self.visit_binop,
+            "JoinedStr": self.visit_joined_str,
+            "FormattedValue": self.visit_formatted_value,
         }
         node_type = type(node).__name__
         if node_type in dispatch:
             return dispatch[node_type](node)
         else:
             raise NotImplementedError(f"Unsupported AST node type: {node_type}")
+
+    def visit_formatted_value(self, node):
+        # This visits the value inside the `{}` of an f-string
+        value = self.visit(node.value)
+        return {"code": f"to_string({value['code']})", "stmt": False}
+
+    def visit_joined_str(self, node):
+        if not f'#include "{os.path.abspath("source/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("source/ops.c")}"')
+        self.debug_log("JoinedStr", "Visiting joined string")
+
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Str):
+                parts.append(f'create_string("{value.s}")')
+            else:
+                result = self.visit(value)
+                if not result['stmt']:
+                    parts.append(result['code'])
+                else:
+                    parts.append(result['code'] + ";")
+
+        joined_str_code = f'join_strings({len(parts)}, {", ".join(parts)})'
+        return {"code": joined_str_code, "stmt": False}
 
     def visit_function_def(self, node):
         self.debug_log("FunctionDef", f"Visiting function: {node.name}")
@@ -451,11 +486,10 @@ class PYTOCTranspiler:
             evaluated_args = [self.visit(arg)['code'] for arg in node.args]
             actual_arg_count = len(evaluated_args)
 
-            # Too many arguments
             if actual_arg_count > expected_arg_count:
                 raise Exception(f"Too many arguments for function '{func_name}'")
 
-            # Fill in missing arguments with defaults
+            # Fill in missing arguments with defaults if available
             if actual_arg_count < expected_arg_count:
                 missing = expected_arg_count - actual_arg_count
                 for i in range(missing):
@@ -467,20 +501,50 @@ class PYTOCTranspiler:
             code = f"{func_name}({', '.join(evaluated_args)})"
             return {"code": code, "stmt": False}
 
+        # Handle function from function_map
         func_info = self.function_map[func_name]
         include_line = f'#include {func_info["lib"]}'
         if include_line not in self.imports:
             self.imports.append(include_line)
 
-        evaluated_args = [self.visit(arg)['code'] for arg in node.args]
+        # Visit all args to get their code
+        provided_args = [self.visit(arg)['code'] for arg in node.args]
+        expected_args = func_info["args"]
 
-        if len(evaluated_args) > len(func_info["args"]):
-            raise ValueError(
-                f"Function {func_name} expects {len(func_info['args'])} arguments, got {len(evaluated_args)}")
+        final_args = []
+        named_args = {}
+
+        # Assign provided args to names
+        for i, arg_def in enumerate(expected_args):
+            if i < len(provided_args):
+                val = provided_args[i]
+                final_args.append(val)
+                named_args[arg_def["name"]] = val
+            else:
+                final_args.append(None)  # placeholder for now
+
+        # Now resolve missing args (defaults/code)
+        for i, arg_def in enumerate(expected_args):
+            if final_args[i] is not None:
+                continue
+            if "code" in arg_def:
+                try:
+                    val = eval(arg_def["code"], {}, named_args)
+                except Exception as e:
+                    raise ValueError(f"Error evaluating code for argument '{arg_def['name']}': {e}")
+                final_args[i] = str(val)
+                named_args[arg_def["name"]] = final_args[i]
+            elif "default" in arg_def:
+                final_args[i] = arg_def["default"]
+                named_args[arg_def["name"]] = final_args[i]
+            else:
+                raise Exception(f"No value for argument '{arg_def['name']}' in function '{func_name}'")
 
         try:
-            call_expr = func_info["format"].format(*evaluated_args)
+            call_expr = func_info["format"].format(*final_args)
         except IndexError:
             raise ValueError(f"Insufficient arguments for function '{func_name}' formatting")
 
         return {"code": call_expr, "stmt": func_info["type"] == "void"}
+
+
