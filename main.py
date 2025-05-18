@@ -188,12 +188,10 @@ if __name__ == "__main__":
         success, message = compile_py_to_c(source_code, output_file, compiler_flags=compiler_flags, debug=debug, mode=mode)
     except Exception as e:
         success = False
-        # C:/Users/sirpigari/Desktop/Projects/PythonToC/temp/tmp2rug5vl5.c:11: error: ',' expected (got ";")
         message = f"{os.path.abspath(source_code)}: {e.__class__.__name__}: {e}"
-    if success:
-        print(f"{message}")
-    else:
-        print(f"{message}")
+    print(f"{message}")
+
+    if not success:
         sys.exit(1)
 
     if auto_run:
