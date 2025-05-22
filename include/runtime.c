@@ -14,6 +14,8 @@ const char* type_name(ValueType t) {
     switch (t) {
         case TYPE_NONE: return "NoneType";
         case TYPE_INT: return "int";
+        case TYPE_FLOAT: return "float";
+        case TYPE_BOOL: return "bool";
         case TYPE_STRING: return "str";
         case TYPE_LIST: return "list";
         case TYPE_TUPLE: return "tuple";
@@ -63,6 +65,37 @@ Value to_string(Value v) {
             fprintf(stderr, "TypeError: cannot convert to str\n");
             exit(1);
     }
+}
+
+Value to_float(Value v) {
+	switch (v.type) {
+		case TYPE_INT:
+			return create_float((double)v.int_val);
+		case TYPE_FLOAT:
+			return v;
+		case TYPE_STRING:
+			return create_float(atof(v.string_val));  // basic string to float
+		default:
+			fprintf(stderr, "TypeError: cannot convert to float\n");
+			exit(1);
+	}
+}
+
+Value to_list(Value v) {
+	switch (v.type) {
+		case TYPE_LIST:
+			return v;
+		case TYPE_TUPLE:
+			return create_list(v.tuple_val.count);
+		case TYPE_SET:
+		case TYPE_FROZENSET:
+			return create_list(v.set_val.count);
+		case TYPE_DICT:
+			return create_list(v.dict_val.count);
+		default:
+			fprintf(stderr, "TypeError: cannot convert to list\n");
+			exit(1);
+	}
 }
 
 Value len(Value v) {
@@ -207,16 +240,39 @@ Value chr_val(Value v) {
     return create_string(buffer);
 }
 
-// range() - simplified, creates list of ints from start to end-1
-Value range_val(Value v_start, Value v_stop, Value v_step) {
-    if (v_step.int_val == 0) {
-        fprintf(stderr, "ValueError: range() step argument must not be zero\n");
+// range() - handles (stop), (start, stop), and (start, stop, step)
+Value range_val(Value v1, Value v2, Value v3) {
+    int start, stop, step;
+
+    if (v1.type != TYPE_INT) {
+        fprintf(stderr, "TypeError: range() arguments must be integers\n");
         exit(1);
     }
 
-    int start = v_start.int_val;
-    int stop = v_stop.int_val;
-    int step = v_step.int_val;
+    if (v2.type == TYPE_NONE && v3.type == TYPE_NONE) {
+        // range(stop)
+        start = 0;
+        stop = v1.int_val;
+        step = 1;
+    } else if (v2.type == TYPE_INT && v3.type == TYPE_NONE) {
+        // range(start, stop)
+        start = v1.int_val;
+        stop = v2.int_val;
+        step = 1;
+    } else if (v2.type == TYPE_INT && v3.type == TYPE_INT) {
+        // range(start, stop, step)
+        start = v1.int_val;
+        stop = v2.int_val;
+        step = v3.int_val;
+
+        if (step == 0) {
+            fprintf(stderr, "ValueError: range() step argument must not be zero\n");
+            exit(1);
+        }
+    } else {
+        fprintf(stderr, "TypeError: invalid combination of arguments for range()\n");
+        exit(1);
+    }
 
     int count = 0;
     if ((step > 0 && start >= stop) || (step < 0 && start <= stop)) {
@@ -234,15 +290,6 @@ Value range_val(Value v_start, Value v_stop, Value v_step) {
     }
 
     return list;
-}
-
-// Overloads for range_val with 1 or 2 arguments
-Value range_stop(Value v_stop) {
-    return range_val(create_int(0), v_stop, create_int(1));
-}
-
-Value range_start_stop(Value v_start, Value v_stop) {
-    return range_val(v_start, v_stop, create_int(1));
 }
 
 // reversed() - returns a reversed list copy
@@ -369,6 +416,19 @@ Value make_tuple(int lenght, Value* items) {
     }
     return tuple;
 }
+
+Value isinstance(Value* v, Value* type_or_str) {
+    if (type_or_str->type == TYPE_STRING) {
+        const char* _type_name = type_or_str->string_val;
+        const char* actual_type_name = type_name(v->type);
+
+        return create_bool(strcmp(_type_name, actual_type_name) == 0);
+    } else {
+        return create_bool(v->type == type_or_str->type);
+    }
+}
+
+
 
 bool is_none(Value v) {
     return v.type == TYPE_NONE;

@@ -8,6 +8,7 @@
 typedef enum {
     TYPE_NONE,
     TYPE_INT,
+    TYPE_FLOAT,
     TYPE_TUPLE,
     TYPE_STRING,
     TYPE_LIST,
@@ -46,14 +47,20 @@ typedef struct {
 } FrozenSet;
 
 typedef struct {
-    int value;
+    int bool_val;
 } Bool;
+
+typedef struct {
+	double float_val;
+} Float;
 
 struct Value {
     ValueType type;
     union {
         int int_val;
+        double float_val;
         char* string_val;
+        int bool_val;
         Tuple tuple_val;
         List list_val;
         Dict dict_val;
@@ -63,6 +70,8 @@ struct Value {
 
 Value None = { .type = TYPE_NONE };
 Value create_int(int val);
+Value create_float(double val);
+Value create_bool(int b);
 Value create_tuple(int size);
 Value create_list(int size);
 Value create_dict(int size);

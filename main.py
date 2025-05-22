@@ -145,7 +145,7 @@ def main():
     args = sys.argv[1:]
     compiler_flags = []
     debug = False
-    architecture = struct.calcsize("P") * 8
+    architecture = str(struct.calcsize("P") * 8)
     auto_run = False
     if "-h" in args or "--help" in args:
         print("Usage: python main.py <source_file.py> <output_file.exe> [compiler_flags] [--debug] [--arch <32|64>] [--auto-run] [--version | -v]")

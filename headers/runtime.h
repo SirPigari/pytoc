@@ -31,6 +31,7 @@ Value isinstance_val(Value v, ValueType type);
 int cmp_int(const void* a, const void* b);
 Value sorted_val(Value list);
 Value set_val(Value v);
+Value isinstance(Value* v, Value* type_or_str);
 Value make_dict(int lenght, Value* keys, Value* values);
 Value make_list(int lenght, Value* items);
 Value make_tuple(int lenght, Value* items);

@@ -16,11 +16,18 @@ Value create_int(int val) {
     return v;
 }
 
+Value create_float(double val) {
+    Value v;
+    v.type = TYPE_FLOAT;
+    v.float_val = val;
+    return v;
+}
 
-Value create_bool(bool val) {
+
+Value create_bool(int b) {
     Value v;
     v.type = TYPE_BOOL;
-    v.int_val = val ? 1 : 0;
+    v.bool_val = b ? 1 : 0;
     return v;
 }
 
@@ -114,6 +121,12 @@ void print_value(Value v) {
         case TYPE_INT:
             printf("%d", v.int_val);
             break;
+		case TYPE_FLOAT:
+		    printf("%g", v.float_val);
+		    break;
+		case TYPE_BOOL:
+		    printf("%s", v.bool_val ? "True" : "False");
+		    break;
         case TYPE_TUPLE:
             printf("(");
             for (int i = 0; i < v.tuple_val.count; i++) {
@@ -291,7 +304,6 @@ Value copy_value(Value v) {
 
     return copy;
 }
-
 
 
 #endif // GLOBAL_C

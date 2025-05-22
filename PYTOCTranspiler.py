@@ -73,6 +73,18 @@ class PYTOCTranspiler:
                 "type": "Value",
                 "args": [{"name": "v", "type": "Value"}],
             },
+            "float": {
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
+                "format": "to_float({0})",
+                "type": "Value",
+                "args": [{"name": "v", "type": "Value"}],
+            },
+            "list": {
+                "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
+                "format": "to_list({0})",
+                "type": "Value",
+                "args": [{"name": "v", "type": "Value"}],
+            },
             "len": {
                 "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
                 "format": "len({0})",
@@ -123,9 +135,13 @@ class PYTOCTranspiler:
             },
             "range": {
                 "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
-                "format": "range_stop({0})",
+                "format": "range_val({0}, {1}, {2})",
                 "type": "Value",
-                "args": [{"name": "stop", "type": "int"}],
+                "args": [
+                    {"name": "start", "type": "int"},
+                    {"name": "stop", "type": "int", "default": "None"},
+                    {"name": "step", "type": "int", "default": "None"},
+                ],
             },
             "range_start_stop": {
                 "lib": f"\"{os.path.abspath('include/runtime.c')}\"",
@@ -173,7 +189,7 @@ class PYTOCTranspiler:
 
     def debug_log(self, kind, message):
         if self.debug:
-            print(f"{'  ' * self.indent_level}[{kind}] {message}")
+            print(f"{self.indent_str * self.indent_level}[{kind}] {message}")
 
     @property
     def indent(self):
@@ -186,6 +202,13 @@ class PYTOCTranspiler:
         if code is not None:
             self.tmps[temp_name] = code
         return temp_name
+
+    def _unique_label(self, prefix="label"):
+        if not hasattr(self, "_label_counter"):
+            self.temp_num = 0
+        label = f"{prefix}_{self.temp_num}"
+        self.temp_num += 1
+        return label
 
     def new_temp_inplace(self, prefix="_tmp", code=None):
         temp_hash = hashlib.md5(str(self.temp_num).encode()).hexdigest()[:8]
@@ -221,12 +244,168 @@ class PYTOCTranspiler:
             "For": self.visit_for,
             "While": self.visit_while,
             "Compare": self.visit_compare,
+            "Assert": self.visit_assert,
+            "UnaryOp": self.visit_unary_op,
+            "Try": self.visit_try,
+            "ExceptHandler": self.visit_except_handler,
+            "Pass": lambda node: {"code": "", "stmt": False},
+            "Raise": self.visit_raise,
         }
         node_type = type(node).__name__
         if node_type in dispatch:
             return dispatch[node_type](node)
         else:
             raise NotImplementedError(f"Unsupported AST node type: {node_type}")
+
+    def visit_raise(self, node):
+        if not f'#include "{os.path.abspath("include/exc.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/exc.c")}"')
+
+        self.debug_log("Raise", "Visiting raise statement")
+        exc_type = node.exc
+        exc_code = self.visit(exc_type)
+        raise_code = f"raise_exception({exc_type}, {exc_code['code']})"
+        return {"code": raise_code, "stmt": True}
+
+    def visit_except_handler(self, node):
+        self.debug_log("ExceptHandler", "Visiting except handler")
+
+        # Create a new temporary variable for the exception
+        exc_var = self.new_temp("_exc")
+        self.variables[exc_var] = "Value"
+
+        # Generate code for the exception handler
+        handler_code = []
+        if node.type:
+            type_code = self.visit(node.type)['code']
+            handler_code.append(f"if (isinstance({exc_var}, {type_code})) {{")
+        else:
+            handler_code.append("{")
+
+        self.indent_level += 1
+        for stmt in node.body:
+            result = self.visit(stmt)
+            if result['stmt']:
+                handler_code.append(self.indent + result['code'] + ";")
+            else:
+                handler_code.append(self.indent + result['code'])
+        self.indent_level -= 1
+
+        handler_code.append(f"{self.indent}}}")
+
+        return {"code": "\n".join(handler_code), "stmt": True}
+
+    def visit_try(self, node):
+        self.debug_log("Try", "Visiting try block")
+
+        try_catch_include = f'#include "{os.path.abspath("include/try-catch.c")}"'
+        if try_catch_include not in self.imports:
+            self.imports.append(try_catch_include)
+        exc_include = f'#include "{os.path.abspath("include/exc.c")}"'
+        if exc_include not in self.imports:
+            self.imports.append(exc_include)
+
+        ctx_name = self.new_temp(prefix="_ctx")
+        exc_name = self.new_temp(prefix="_exc")
+        exc_name_2 = self.new_temp("_exc")
+
+        declaration = f"TryCatchContext {ctx_name};"
+        exc_declaration = f"Exception {exc_name};"
+        self.indent_level -= 1
+        declaration_2 = f"{self.indent}TryCatchContext *{exc_name_2};"
+        try_header = f"{self.indent}TRY(&{ctx_name}) {{"
+        catch_header = f"{self.indent}}} CATCH(&{ctx_name}, {exc_name}) {{"
+        try_ending = f"{self.indent}}} END_TRY(&{ctx_name})"
+
+        # Generate TRY body
+        self.indent_level += 1
+        try_code = []
+        for stmt in node.body:
+            result = self.visit(stmt)
+            code_line = self.indent + result['code']
+            if result['stmt']:
+                code_line += ";"
+            try_code.append(code_line)
+        self.indent_level -= 1
+
+        self.indent_level += 1
+        except_code = []
+
+        for handler in node.handlers:
+            if handler.type is not None and hasattr(handler.type, 'id'):
+                exception_type = handler.type.id
+            else:
+                exception_type = "Exception"
+
+            # NOTE: `_exc` is a C-side variable you must define in your runtime
+            except_code.append(f"{self.indent}Value {exc_name} = make_value_from_exc({exc_name_2});")
+            check_line = f"{self.indent}if (is_true(isinstance(&{exc_name}, &{exception_type}))) {{"
+            except_code.append(check_line)
+            old_temps_inplace = self.inline_tmps
+            self.indent_level += 1
+            for stmt in handler.body:
+                self.inline_tmps.clear()
+                result = self.visit(stmt)
+                if self.inline_tmps:
+                    self.debug_log("InlineTmps", f"Inlined temporary variables: {self.inline_tmps}")
+                for tmp_name, tmp_code in self.inline_tmps.items():
+                    line = f"{self.indent}{str(tmp_code).replace('{{ temp_name }}', str(tmp_name))};"
+                    except_code.append(line)
+                line = self.indent + result['code']
+                if result['stmt']:
+                    line += ";"
+                except_code.append(line)
+            self.indent_level -= 1
+            except_code.append(self.indent + "}")
+
+        # Restore the original inline temporary variables
+        self.inline_tmps = old_temps_inplace
+        self.indent_level -= 1
+
+        full_code = "\n".join([
+            declaration,
+            declaration_2,
+            try_header,
+            *try_code,
+            catch_header,
+            *except_code,
+            try_ending,
+        ])
+
+        return {"code": full_code, "stmt": True}
+
+    def visit_unary_op(self, node):
+        self.debug_log("UnaryOp", "Visiting unary operation")
+        if not f'#include "{os.path.abspath("include/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/ops.c")}"')
+
+        operand_code = self.visit(node.operand)['code']
+        op_class = node.op.__class__.__name__
+
+        # Map Python AST operator classes to runtime C functions
+        op_map = {
+            "Not": "not_values",
+            "USub": "neg_values",
+            "UAdd": "pos_values",
+        }
+
+        if op_class not in op_map:
+            raise NotImplementedError(f"Unsupported unary operator: {op_class}")
+
+        func = op_map[op_class]
+        unary_code = f"{func}({operand_code})"
+        return {"code": unary_code, "stmt": False}
+
+    def visit_assert(self, node):
+        self.debug_log("Assert", "Visiting assert statement")
+        if not f'#include "{os.path.abspath("include/ops.c")}"' in self.imports:
+            self.imports.append(f'#include "{os.path.abspath("include/ops.c")}"')
+
+        condition_code = self.visit(node.test)['code']
+        message_code = self.visit(node.msg)['code'] if node.msg else 'None'
+
+        assert_code = f"assert({condition_code}, {message_code})"
+        return {"code": assert_code, "stmt": True}
 
     def visit_compare(self, node):
         self.debug_log("Compare", "Visiting comparison")
@@ -319,8 +498,15 @@ class PYTOCTranspiler:
         self.indent_level += 1
         loop_body = [f"{self.indent}Value {loop_var} = {iter_tmp}.list_val.items[{index_var}];"]
 
+        inline_tmps = self.inline_tmps
+
         for stmt in node.body:
+            self.inline_tmps.clear()
             result = self.visit(stmt)
+            if self.inline_tmps:
+                self.debug_log("InlineTmps", f"Inlined temporary variables: {self.inline_tmps}")
+            for tmp_name, tmp_code in self.inline_tmps.items():
+                loop_body.append(f"{self.indent}{str(tmp_code).replace('{{ temp_name }}', str(tmp_name))};")
             if result['stmt']:
                 if result['code'].endswith(";"):
                     loop_body.append(self.indent + result['code'])
@@ -328,6 +514,9 @@ class PYTOCTranspiler:
                     loop_body.append(self.indent + result['code'] + ";")
             else:
                 loop_body.append(self.indent + result['code'])
+
+        self.inline_tmps.clear()
+        self.inline_tmps = inline_tmps
 
         self.indent_level -= 1
         loop_footer = f"{self.indent}}}"
@@ -479,6 +668,9 @@ class PYTOCTranspiler:
             "Sub": "sub_values",
             "Mult": "mul_values",
             "Div": "div_values",
+            "Mod": "mod_values",
+            "FloorDiv": "floordiv_values",
+            "Pow": "pow_values",
         }
 
         if op_class not in op_map:
@@ -544,7 +736,7 @@ class PYTOCTranspiler:
 
         self.imports = [
             f'#include "{os.path.abspath("include/_global.c")}"',
-            f'#include "{os.path.abspath("include/runtime.c")}"'
+            f'#include "{os.path.abspath("include/runtime.c")}"',
         ]
 
         self.func_defs.clear()
@@ -572,6 +764,17 @@ class PYTOCTranspiler:
         for tmp_name, tmp_code in self.tmps.items():
             body_code.append(f"{self.indent}{str(tmp_code).replace("{{ temp_name }}", str(tmp_name))};")
 
+
+        inits = []
+        if f'#include "{os.path.abspath("include/exc.c")}"' in self.imports:
+            print("Include exc.c")
+            inits.append(f"{self.indent}init_exc();")
+
+        if inits:
+            for init in inits:
+                body_code.append(init)
+            body_code.append(f"{self.indent}")
+
         if body_code_tmp and self.tmps:
             body_code.append(f"{self.indent}")
         self.tmps.clear()
@@ -588,7 +791,18 @@ class PYTOCTranspiler:
         self.indent_level -= 1
         body_code.append("}")
 
-        self.c_code = self.imports + [self.indent] + self.func_defs + body_code
+        body_code.append(f"{self.indent}")
+
+        message = [
+            "// ---------------------------------- //",
+            "//     Generated by PYTOCTranspiler   //",
+            "//            By SirPigari            //",
+            "// https://github.com/SirPigari/pytoc //",
+            "// ---------------------------------- //",
+            "",
+        ]
+
+        self.c_code = self.imports + [self.indent] + message + self.func_defs + body_code
 
         return {"code": "\n".join(self.c_code), "stmt": False}
 
@@ -610,6 +824,9 @@ class PYTOCTranspiler:
             elif isinstance(val, str):
                 creation_code = f'create_string("{val}")'
                 self.variables[target_name] = "TYPE_STRING"
+            elif isinstance(val, float):
+                creation_code = f"create_float({val})"
+                self.variables[target_name] = "TYPE_FLOAT"
             elif val is None:
                 creation_code = "None"
                 self.variables[target_name] = "TYPE_NONE"
@@ -632,10 +849,15 @@ class PYTOCTranspiler:
         val = node.value
         if isinstance(val, str):
             return {"code": f'create_string("{val}")', "stmt": False}
-        elif isinstance(val, int):
-            return {"code": f'create_int({val})', "stmt": False}
         elif val is None:
             return {"code": "None", "stmt": False}
+        elif isinstance(val, bool):
+            value = 0 if not val else 1
+            return {"code": f'create_bool({value})', "stmt": False}
+        elif isinstance(val, int):
+            return {"code": f'create_int({val})', "stmt": False}
+        elif isinstance(val, float):
+            return {"code": f'create_float({val})', "stmt": False}
         else:
             raise TypeError(f"Unsupported constant type: {type(val)}")
 
